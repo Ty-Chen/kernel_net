@@ -55,6 +55,12 @@
  * NOTE: BBR might be used with the fq qdisc ("man tc-fq") with pacing enabled,
  * otherwise TCP stack falls back to an internal pacing using one high
  * resolution timer per TCP socket and may use more resources.
+ *
+ * Without fq qdisc, there may be some problem about RTT fair when lots of BBR
+ * flows share a network but with different RTT.
+ * Long RTT may hold more throughput than little one.
+ * 详情可参考相关论文介绍：BBQ算法
+ *
  */
 #include <linux/module.h>
 #include <net/tcp.h>
@@ -134,6 +140,8 @@ static const int bbr_min_tso_rate = 1200000;
  * that will allow a smoothly increasing pacing rate that will double each RTT
  * and send the same number of packets per RTT that an un-paced, slow-starting
  * Reno or CUBIC flow would:
+ *
+ * 模拟cubic的增加曲线做出的增长系数，这里类似于慢增长算法
  */
 static const int bbr_high_gain  = BBR_UNIT * 2885 / 1000 + 1;
 /* The pacing gain of 1/high_gain in BBR_DRAIN is calculated to typically drain
@@ -143,6 +151,7 @@ static const int bbr_drain_gain = BBR_UNIT * 1000 / 2885;
 /* The gain for deriving steady-state cwnd tolerates delayed/stretched ACKs: */
 static const int bbr_cwnd_gain  = BBR_UNIT * 2;
 /* The pacing_gain values for the PROBE_BW gain cycle, to discover/share bw: */
+/* 第一个RTT时间多发送四分之一，第二次少发送四分之一以排空队列，之后以估计窗口值发送6次，作为一整个循环*/
 static const int bbr_pacing_gain[] = {
 	BBR_UNIT * 5 / 4,	/* probe for more available bw */
 	BBR_UNIT * 3 / 4,	/* drain queue and/or yield bw to other flows */
@@ -155,6 +164,10 @@ static const u32 bbr_cycle_rand = 7;
 /* Try to keep at least this many packets in flight, if things go smoothly. For
  * smooth functioning, a sliding window protocol ACKing every other packet
  * needs at least 4 packets in flight:
+ *
+ * 至少4个而不是1个是因为考虑到以下因素
+ * （1）可能会有ACK延迟累积发送机制存在
+ * （2）往返各2各则一共至少4个
  */
 static const u32 bbr_cwnd_min_target = 4;
 
