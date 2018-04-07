@@ -46,12 +46,14 @@ static struct hlist_head *nf_nat_bysource __read_mostly;
 static unsigned int nf_nat_htable_size __read_mostly;
 static unsigned int nf_nat_hash_rnd __read_mostly;
 
+/*返回L3层协议类型*/
 inline const struct nf_nat_l3proto *
 __nf_nat_l3proto_find(u8 family)
 {
 	return rcu_dereference(nf_nat_l3protos[family]);
 }
 
+/*返回L4层协议类型*/
 inline const struct nf_nat_l4proto *
 __nf_nat_l4proto_find(u8 family, u8 protonum)
 {
@@ -144,6 +146,7 @@ nf_nat_used_tuple(const struct nf_conntrack_tuple *tuple,
 	 * incoming ones.  NAT means they don't have a fixed mapping,
 	 * so we invert the tuple and look for the incoming reply.
 	 *
+	 * 这里对tuple做了一个颠倒，意义入上文英文所述
 	 * We could keep a separate hash if this proves too slow.
 	 */
 	struct nf_conntrack_tuple reply;
@@ -155,6 +158,7 @@ EXPORT_SYMBOL(nf_nat_used_tuple);
 
 /* If we source map this tuple so reply looks like reply_tuple, will
  * that meet the constraints of range.
+ * 检测range是否合法
  */
 static int in_range(const struct nf_nat_l3proto *l3proto,
 		    const struct nf_nat_l4proto *l4proto,
@@ -189,6 +193,11 @@ same_src(const struct nf_conn *ct,
 }
 
 /* Only called for SRC manip */
+/*
+ * 函数功能：用于确定ip地址、端口等是否在合适的范围,
+ * 并且定义了一个nf_conn_nat结构的变量nat，结构体中的成员bysource是一个hash链表(根据源IP来查找)，
+ * 把即将进行NAT操作的连接都放到这个hash表里。
+ */
 static int
 find_appropriate_src(struct net *net,
 		     const struct nf_conntrack_zone *zone,
@@ -296,7 +305,14 @@ find_best_ips_proto(const struct nf_conntrack_zone *zone,
  * and NF_INET_LOCAL_OUT, we change the destination to map into the
  * range. It might not be possible to get a unique tuple, but we try.
  * At worst (or if we race), we will end up with a final duplicate in
- * __ip_conntrack_confirm and drop the packet. */
+ * __ip_conntrack_confirm and drop the packet. 
+ *
+ * 核心函数，为入、出的tuple分配合适的外部、内部tuple,详情入上文英文所述
+ * 首先，调用find_appropriate_src( )确定ip地址、端口等是否在合适的范围
+ * 然后定义了一个nf_conn_nat结构的变量nat，结构体中的成员bysource把即将进行NAT操作的连接都放到这个hash表里
+ * 随后，由find_best_ips_proto分配“最少使用的”tuple（如果自带的不在合适范围内）
+ * 最终，调用nat协议的操作集调用unique_tuple成员函数。
+ */
 static void
 get_unique_tuple(struct nf_conntrack_tuple *tuple,
 		 const struct nf_conntrack_tuple *orig_tuple,
@@ -323,6 +339,8 @@ get_unique_tuple(struct nf_conntrack_tuple *tuple,
 	 * This is only required for source (ie. NAT/masq) mappings.
 	 * So far, we don't do local source mappings, so multiple
 	 * manips not an issue.
+	 *
+	 * 仔细看这里的标记位检查，发现了RANDOM_ALL，这是iptables命令行masquerade --random所对应的标记位
 	 */
 	if (maniptype == NF_NAT_MANIP_SRC &&
 	    !(range->flags & NF_NAT_RANGE_PROTO_RANDOM_ALL)) {
@@ -381,6 +399,13 @@ struct nf_conn_nat *nf_ct_nat_ext_add(struct nf_conn *ct)
 }
 EXPORT_SYMBOL_GPL(nf_ct_nat_ext_add);
 
+/*
+ * masquerade最终调用的传入函数
+ *
+ * 本函数会调用get_unique_tuple( )来获取唯一的tuple五元组
+ * 之后函数返回到nf_nat_packet继续执行
+ * 最终调用manip_pkt( )来完成ip和端口的转换
+ */
 unsigned int
 nf_nat_setup_info(struct nf_conn *ct,
 		  const struct nf_nat_range *range,
