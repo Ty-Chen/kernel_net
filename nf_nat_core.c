@@ -38,6 +38,10 @@ static const struct nf_nat_l3proto __rcu *nf_nat_l3protos[NFPROTO_NUMPROTO]
 static const struct nf_nat_l4proto __rcu **nf_nat_l4protos[NFPROTO_NUMPROTO]
 						__read_mostly;
 
+/*
+ * NAT为内部tuple提供了一个基于src ip的哈希表
+ * 由此，NAT可以实现对已分配IP的内部tuple直接转换，对目标tuple的访问转换为对应的内部tuple
+ */
 static struct hlist_head *nf_nat_bysource __read_mostly;
 static unsigned int nf_nat_htable_size __read_mostly;
 static unsigned int nf_nat_hash_rnd __read_mostly;
