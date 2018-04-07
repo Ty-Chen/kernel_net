@@ -501,7 +501,7 @@ nf_nat_alloc_null_binding(struct nf_conn *ct, unsigned int hooknum)
 }
 EXPORT_SYMBOL_GPL(nf_nat_alloc_null_binding);
 
-/* Do packet manipulations according to nf_nat_setup_info. */
+/* Do packet manipulations according to nf_nat_setup_info.根据nf_nat_setup_info做包处理 */
 unsigned int nf_nat_packet(struct nf_conn *ct,
 			   enum ip_conntrack_info ctinfo,
 			   unsigned int hooknum,
