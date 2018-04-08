@@ -78,10 +78,13 @@
 #define BW_SCALE 24
 #define BW_UNIT (1 << BW_SCALE)
 
+/*个人推测这里的BBR单位意思是使用kb作为单位，不知道理解的是否正确*/
 #define BBR_SCALE 8	/* scaling factor for fractions in BBR (e.g. gains) */
 #define BBR_UNIT (1 << BBR_SCALE)
 
-/* BBR has the following modes for deciding how fast to send: */
+/* BBR has the following modes for deciding how fast to send:
+ * BBR四种标准状态
+ */
 enum bbr_mode {
 	BBR_STARTUP,	/* ramp up sending rate rapidly to fill pipe */
 	BBR_DRAIN,	/* drain any queue created during startup */
@@ -180,7 +183,9 @@ static const u32 bbr_full_bw_cnt = 3;
 /* "long-term" ("LT") bandwidth estimator parameters... */
 /* The minimum number of rounds in an LT bw sampling interval: */
 static const u32 bbr_lt_intvl_min_rtts = 4;
-/* If lost/delivered ratio > 20%, interval is "lossy" and we may be policed: */
+/* If lost/delivered ratio > 20%, interval is "lossy" and we may be policed: 
+ * 论文中丢包率大于20%会有暴跌，就是这里带来的
+ */
 static const u32 bbr_lt_loss_thresh = 50;
 /* If 2 intervals have a bw ratio <= 1/8, their bw is "consistent": */
 static const u32 bbr_lt_bw_ratio = BBR_UNIT / 8;
@@ -189,7 +194,7 @@ static const u32 bbr_lt_bw_diff = 4000 / 8;
 /* If we estimate we're policed, use lt_bw for this many round trips: */
 static const u32 bbr_lt_bw_max_rtts = 48;
 
-/* Do we estimate that STARTUP filled the pipe? */
+/* Do we estimate that STARTUP filled the pipe?检测STARTUP是否结束 */
 static bool bbr_full_bw_reached(const struct sock *sk)
 {
 	const struct bbr *bbr = inet_csk_ca(sk);
@@ -197,7 +202,7 @@ static bool bbr_full_bw_reached(const struct sock *sk)
 	return bbr->full_bw_reached;
 }
 
-/* Return the windowed max recent bandwidth sample, in pkts/uS << BW_SCALE. */
+/* Return the windowed max recent bandwidth sample, in pkts/uS << BW_SCALE. 最大探测带宽*/
 static u32 bbr_max_bw(const struct sock *sk)
 {
 	struct bbr *bbr = inet_csk_ca(sk);
@@ -205,7 +210,7 @@ static u32 bbr_max_bw(const struct sock *sk)
 	return minmax_get(&bbr->bw);
 }
 
-/* Return the estimated bandwidth of the path, in pkts/uS << BW_SCALE. */
+/* Return the estimated bandwidth of the path, in pkts/uS << BW_SCALE. 设置估计带宽为LT_bw或者最大探测带宽*/
 static u32 bbr_bw(const struct sock *sk)
 {
 	struct bbr *bbr = inet_csk_ca(sk);
@@ -293,7 +298,7 @@ static void bbr_set_tso_segs_goal(struct sock *sk)
 				 0x7FU);
 }
 
-/* Save "last known good" cwnd so we can restore it after losses or PROBE_RTT */
+/* Save "last known good" cwnd so we can restore it after losses or PROBE_RTT 保存上次使用的拥塞窗口*/
 static void bbr_save_cwnd(struct sock *sk)
 {
 	struct tcp_sock *tp = tcp_sk(sk);
@@ -305,6 +310,7 @@ static void bbr_save_cwnd(struct sock *sk)
 		bbr->prior_cwnd = max(bbr->prior_cwnd, tp->snd_cwnd);
 }
 
+/*拥塞窗口事件触发：如果在探测阶段则设置pacing rate*/
 static void bbr_cwnd_event(struct sock *sk, enum tcp_ca_event event)
 {
 	struct tcp_sock *tp = tcp_sk(sk);
@@ -323,7 +329,7 @@ static void bbr_cwnd_event(struct sock *sk, enum tcp_ca_event event)
 /* Find target cwnd. Right-size the cwnd based on min RTT and the
  * estimated bottleneck bandwidth:
  *
- * cwnd = bw * min_rtt * gain = BDP * gain
+ * cwnd = bw * min_rtt * gain = BDP * gain 核心公式
  *
  * The key factor, gain, controls the amount of queue. While a small gain
  * builds a smaller queue, it becomes more vulnerable to noise in RTT
@@ -334,7 +340,9 @@ static void bbr_cwnd_event(struct sock *sk, enum tcp_ca_event event)
  * fit full-sized skbs in-flight on both end hosts to fully utilize the path:
  *   - one skb in sending host Qdisc,
  *   - one skb in sending host TSO/GSO engine
+ *	
  *   - one skb being received by receiver host LRO/GRO/delayed-ACK engine
+ *	
  * Don't worry, at low rates (bbr_min_tso_rate) this won't bloat cwnd because
  * in such cases tso_segs_goal is 1. The minimum cwnd is 4 packets,
  * which allows 2 outstanding 2-packet sequences, to try to keep pipe
