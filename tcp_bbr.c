@@ -718,7 +718,9 @@ static void bbr_update_bw(struct sock *sk, const struct rate_sample *rs)
 /* Estimate when the pipe is full, using the change in delivery rate: BBR
  * estimates that STARTUP filled the pipe if the estimated bw hasn't changed by
  * at least bbr_full_bw_thresh (25%) after bbr_full_bw_cnt (3) non-app-limited
- * rounds. Why 3 rounds: 1: rwin autotuning grows the rwin, 2: we fill the
+ * rounds. 
+ * 通过三轮未增加带宽检测
+ * Why 3 rounds: 1: rwin autotuning grows the rwin, 2: we fill the
  * higher rwin, 3: we get higher delivery rate samples. Or transient
  * cross-traffic or radio noise can go away. CUBIC Hystart shares a similar
  * design goal, but uses delay and inter-ACK spacing instead of bandwidth.
@@ -742,7 +744,9 @@ static void bbr_check_full_bw_reached(struct sock *sk,
 	bbr->full_bw_reached = bbr->full_bw_cnt >= bbr_full_bw_cnt;
 }
 
-/* If pipe is probably full, drain the queue and then enter steady-state. */
+/* STARTUP后期，检查管道是否满了，满了则切换至DRAIN 
+ * If pipe is probably full, drain the queue and then enter steady-state. 
+ */
 static void bbr_check_drain(struct sock *sk, const struct rate_sample *rs)
 {
 	struct bbr *bbr = inet_csk_ca(sk);
@@ -758,7 +762,8 @@ static void bbr_check_drain(struct sock *sk, const struct rate_sample *rs)
 		bbr_reset_probe_bw_mode(sk);  /* we estimate queue is drained */
 }
 
-/* The goal of PROBE_RTT mode is to have BBR flows cooperatively and
+/* PROBE_RTT状态
+ * The goal of PROBE_RTT mode is to have BBR flows cooperatively and
  * periodically drain the bottleneck queue, to converge to measure the true
  * min_rtt (unloaded propagation delay). This allows the flows to keep queues
  * small (reducing queuing delay and packet loss) and achieve fairness among
@@ -826,6 +831,7 @@ static void bbr_update_min_rtt(struct sock *sk, const struct rate_sample *rs)
 	bbr->idle_restart = 0;
 }
 
+/*全状态更新函数如下所列*/
 static void bbr_update_model(struct sock *sk, const struct rate_sample *rs)
 {
 	bbr_update_bw(sk, rs);
