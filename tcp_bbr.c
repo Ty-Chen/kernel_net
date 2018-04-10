@@ -241,7 +241,9 @@ static u32 bbr_bw_to_pacing_rate(struct sock *sk, u32 bw, int gain)
 	return rate;
 }
 
-/* Initialize pacing rate to: high_gain * init_cwnd / RTT. */
+/* 初始化pacing rate
+ * Initialize pacing rate to: high_gain * init_cwnd / RTT. 
+ */
 static void bbr_init_pacing_rate_from_rtt(struct sock *sk)
 {
 	struct tcp_sock *tp = tcp_sk(sk);
@@ -342,7 +344,7 @@ static void bbr_cwnd_event(struct sock *sk, enum tcp_ca_event event)
  *   - one skb in sending host TSO/GSO engine
  *	
  *   - one skb being received by receiver host LRO/GRO/delayed-ACK engine
- *	
+ * 此处解释为啥最少需要4个包	
  * Don't worry, at low rates (bbr_min_tso_rate) this won't bloat cwnd because
  * in such cases tso_segs_goal is 1. The minimum cwnd is 4 packets,
  * which allows 2 outstanding 2-packet sequences, to try to keep pipe
