@@ -538,6 +538,7 @@ static void bbr_reset_probe_bw_mode(struct sock *sk)
 	bbr_advance_cycle_phase(sk);	/* flip to next phase of gain cycle */
 }
 
+/*PROBE_RTT结束后的状态重置*/
 static void bbr_reset_mode(struct sock *sk)
 {
 	if (!bbr_full_bw_reached(sk))
@@ -726,6 +727,10 @@ static void bbr_update_bw(struct sock *sk, const struct rate_sample *rs)
  * higher rwin, 3: we get higher delivery rate samples. Or transient
  * cross-traffic or radio noise can go away. CUBIC Hystart shares a similar
  * design goal, but uses delay and inter-ACK spacing instead of bandwidth.
+ * 
+ * 第一轮接收窗口探测到了带宽的增加并增加窗口
+ * 第二轮填满接收窗口
+ * 第三轮返回高的传输速率
  */
 static void bbr_check_full_bw_reached(struct sock *sk,
 				      const struct rate_sample *rs)
@@ -783,6 +788,8 @@ static void bbr_check_drain(struct sock *sk, const struct rate_sample *rs)
  * natural silences or low-rate periods within 10 seconds where the rate is low
  * enough for long enough to drain its queue in the bottleneck. We pick up
  * these min RTT measurements opportunistically with our min_rtt filter. :-)
+ *
+ * 若在PROBE_RTT结束时，根据当前网络状况决定进入STARTUP还是PROBE_BW
  */
 static void bbr_update_min_rtt(struct sock *sk, const struct rate_sample *rs)
 {
