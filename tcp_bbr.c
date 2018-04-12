@@ -9,6 +9,8 @@
  *   pacing_rate = pacing_gain * bottleneck_bandwidth
  *   cwnd = max(cwnd_gain * bottleneck_bandwidth * min_rtt, 4)
  *
+ * pacing_rate和cwnd是整个算法最关键的核心所在，他们随着状态的变化而改变，并以此在实际上控制TCP的发包
+ *
  * The core algorithm does not react directly to packet losses or delays,
  * although BBR may adjust the size of next send per ACK when loss is
  * observed, or adjust the sending rate if it estimates there is a
@@ -132,8 +134,12 @@ struct bbr {
 
 /* Window length of bw filter (in rounds): */
 static const int bbr_bw_rtts = CYCLE_LEN + 2;
-/* Window length of min_rtt filter (in sec): */
+
+/* 10s未更新最小RTT则进入PROBE_RTT
+ * Window length of min_rtt filter (in sec): 
+ */
 static const u32 bbr_min_rtt_win_sec = 10;
+
 /* Minimum time (in ms) spent at bbr_cwnd_min_target in BBR_PROBE_RTT mode: */
 static const u32 bbr_probe_rtt_mode_ms = 200;
 /* Skip TSO below the following bandwidth (bits/sec): */
@@ -363,7 +369,7 @@ static u32 bbr_target_cwnd(struct sock *sk, u32 bw, int gain)
 	 * case we need to slow-start up toward something safe: TCP_INIT_CWND.
 	 */
 	if (unlikely(bbr->min_rtt_us == ~0U))	 /* no valid RTT samples yet? */
-		return TCP_INIT_CWND;  /* be safe: cap at default initial cwnd*/
+		return TCP_INIT_CWND;  /* 初始值10 be safe: cap at default initial cwnd*/
 
 	w = (u64)bw * bbr->min_rtt_us;
 
@@ -379,7 +385,8 @@ static u32 bbr_target_cwnd(struct sock *sk, u32 bw, int gain)
 	return cwnd;
 }
 
-/* An optimization in BBR to reduce losses: On the first round of recovery, we
+/* 保存窗口
+ * An optimization in BBR to reduce losses: On the first round of recovery, we
  * follow the packet conservation principle: send P packets per P packets acked.
  * After that, we slow-start and send at most 2*P packets per P packets acked.
  * After recovery finishes, or upon undo, we restore the cwnd we had when
