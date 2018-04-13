@@ -385,7 +385,7 @@ static u32 bbr_target_cwnd(struct sock *sk, u32 bw, int gain)
 	return cwnd;
 }
 
-/* 保存窗口
+/* 保存窗口，方便从PROBE_RTT进入时恢复
  * An optimization in BBR to reduce losses: On the first round of recovery, we
  * follow the packet conservation principle: send P packets per P packets acked.
  * After that, we slow-start and send at most 2*P packets per P packets acked.
