@@ -268,7 +268,8 @@ static void bbr_init_pacing_rate_from_rtt(struct sock *sk)
 	sk->sk_pacing_rate = bbr_bw_to_pacing_rate(sk, bw, bbr_high_gain);
 }
 
-/* Pace using current bw estimate and a gain factor. In order to help drive the
+/* pacing_rate是控制速率的关键手段
+ * Pace using current bw estimate and a gain factor. In order to help drive the
  * network toward lower queues while maintaining high utilization and low
  * latency, the average pacing rate aims to be slightly (~1%) lower than the
  * estimated bandwidth. This is an important aspect of the design. In this
@@ -281,8 +282,9 @@ static void bbr_set_pacing_rate(struct sock *sk, u32 bw, int gain)
 	struct bbr *bbr = inet_csk_ca(sk);
 	u32 rate = bbr_bw_to_pacing_rate(sk, bw, gain);
 
+	/*如果未收到ACK则调用初始化速率*/
 	if (unlikely(!bbr->has_seen_rtt && tp->srtt_us))
-		bbr_init_pacing_rate_from_rtt(sk);
+		bbr_init_pacing_rate_from_rtt(sk);	
 	if (bbr_full_bw_reached(sk) || rate > sk->sk_pacing_rate)
 		sk->sk_pacing_rate = rate;
 }
