@@ -61,6 +61,7 @@ __nf_nat_l4proto_find(u8 family, u8 protonum)
 }
 EXPORT_SYMBOL_GPL(__nf_nat_l4proto_find);
 
+/*回调L3层协议进行skb解析*/
 #ifdef CONFIG_XFRM
 static void __nf_nat_decode_session(struct sk_buff *skb, struct flowi *fl)
 {
@@ -80,6 +81,7 @@ static void __nf_nat_decode_session(struct sk_buff *skb, struct flowi *fl)
 	if (l3proto == NULL)
 		return;
 
+	/*记录是SNAT还是DNAT*/
 	dir = CTINFO2DIR(ctinfo);
 	if (dir == IP_CT_DIR_ORIGINAL)
 		statusbit = IPS_DST_NAT;
@@ -122,7 +124,9 @@ int nf_xfrm_me_harder(struct net *net, struct sk_buff *skb, unsigned int family)
 EXPORT_SYMBOL(nf_xfrm_me_harder);
 #endif /* CONFIG_XFRM */
 
-/* We keep an extra hash for each conntrack, for fast searching. */
+/* 基于src的哈希表：用于保存和款速查找tuple记录 
+ * We keep an extra hash for each conntrack, for fast searching. 
+ */
 static unsigned int
 hash_by_src(const struct net *n, const struct nf_conntrack_tuple *tuple)
 {
@@ -130,7 +134,11 @@ hash_by_src(const struct net *n, const struct nf_conntrack_tuple *tuple)
 
 	get_random_once(&nf_nat_hash_rnd, sizeof(nf_nat_hash_rnd));
 
-	/* Original src, to ensure we map it consistently if poss. */
+	
+	/* 该哈希表是根据tuple的src来计算的
+	 * 由此也引来了问题：当我们从外部访问时
+	 * Original src, to ensure we map it consistently if poss. 
+	 */
 	hash = jhash2((u32 *)&tuple->src, sizeof(tuple->src) / sizeof(u32),
 		      tuple->dst.protonum ^ nf_nat_hash_rnd ^ net_hash_mix(n));
 
@@ -146,7 +154,7 @@ nf_nat_used_tuple(const struct nf_conntrack_tuple *tuple,
 	 * incoming ones.  NAT means they don't have a fixed mapping,
 	 * so we invert the tuple and look for the incoming reply.
 	 *
-	 * 这里对tuple做了一个颠倒，意义入上文英文所述
+	 * 这里对tuple做了一个颠倒，意义入上文英文所述：访问进来的tuple与原tuple比应该刚好是源地址和目标地址颠倒的
 	 * We could keep a separate hash if this proves too slow.
 	 */
 	struct nf_conntrack_tuple reply;
