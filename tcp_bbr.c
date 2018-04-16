@@ -24,6 +24,7 @@
  *    |        |         |
  *    |        V         |
  *    |      DRAIN   ----+
+ 
  *    |        |         |
  *    |        V         |
  *    +---> PROBE_BW ----+
@@ -225,7 +226,8 @@ static u32 bbr_bw(const struct sock *sk)
 	return bbr->lt_use_bw ? bbr->lt_bw : bbr_max_bw(sk);
 }
 
-/* Return rate in bytes per second, optionally with a gain.
+/* 根据ACK计算速率
+ * Return rate in bytes per second, optionally with a gain.
  * The order here is chosen carefully to avoid overflow of u64. This should
  * work for input rates of up to 2.9Tbit/sec and gain of 2.89x.
  */
@@ -238,7 +240,9 @@ static u64 bbr_rate_bytes_per_sec(struct sock *sk, u64 rate, int gain)
 	return rate >> BW_SCALE;
 }
 
-/* Convert a BBR bw and gain factor to a pacing rate in bytes per second. */
+/* 根据bw计算pacing_rate 
+ * Convert a BBR bw and gain factor to a pacing rate in bytes per second. 
+ */
 static u32 bbr_bw_to_pacing_rate(struct sock *sk, u32 bw, int gain)
 {
 	u64 rate = bw;
@@ -517,7 +521,9 @@ static void bbr_advance_cycle_phase(struct sock *sk)
 	bbr->pacing_gain = bbr_pacing_gain[bbr->cycle_idx];
 }
 
-/* Gain cycling: cycle pacing gain to converge to fair share of available bw. */
+/* Probe_BW阶段的gain循环 
+ * Gain cycling: cycle pacing gain to converge to fair share of available bw. 
+ */
 static void bbr_update_cycle_phase(struct sock *sk,
 				   const struct rate_sample *rs)
 {
@@ -604,7 +610,8 @@ static void bbr_lt_bw_interval_done(struct sock *sk, u32 bw)
 	bbr_reset_lt_bw_sampling_interval(sk);
 }
 
-/* Token-bucket traffic policers are common (see "An Internet-Wide Analysis of
+/* 考虑到可能TCP使用了令牌桶限制流量，因此这里对令牌桶的情况进行了单独处理
+ * Token-bucket traffic policers are common (see "An Internet-Wide Analysis of
  * Traffic Policing", SIGCOMM 2016). BBR detects token-bucket policers and
  * explicitly models their policed rate, to reduce unnecessary losses. We
  * estimate that we're policed if we see 2 consecutive sampling intervals with
@@ -628,7 +635,8 @@ static void bbr_lt_bw_sampling(struct sock *sk, const struct rate_sample *rs)
 		return;
 	}
 
-	/* Wait for the first loss before sampling, to let the policer exhaust
+	/* 当没有令牌即可估计稳定状态的容量
+	 * Wait for the first loss before sampling, to let the policer exhaust
 	 * its tokens and estimate the steady-state rate allowed by the policer.
 	 * Starting samples earlier includes bursts that over-estimate the bw.
 	 */
@@ -683,7 +691,9 @@ static void bbr_lt_bw_sampling(struct sock *sk, const struct rate_sample *rs)
 	bbr_lt_bw_interval_done(sk, bw);
 }
 
-/* Estimate the bandwidth based on how fast packets are delivered */
+/* 带宽估计 
+ * Estimate the bandwidth based on how fast packets are delivered 
+ */
 static void bbr_update_bw(struct sock *sk, const struct rate_sample *rs)
 {
 	struct tcp_sock *tp = tcp_sk(sk);
