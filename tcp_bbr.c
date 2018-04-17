@@ -185,7 +185,9 @@ static const u32 bbr_cwnd_min_target = 4;
 /* To estimate if BBR_STARTUP mode (i.e. high_gain) has filled pipe... */
 /* If bw has increased significantly (1.25x), there may be more bw available: */
 static const u32 bbr_full_bw_thresh = BBR_UNIT * 5 / 4;
-/* But after 3 rounds w/o significant bw growth, estimate pipe is full: */
+/* 3个ACK未增长则视为管道已满
+ * But after 3 rounds w/o significant bw growth, estimate pipe is full: 
+ */
 static const u32 bbr_full_bw_cnt = 3;
 
 /* "long-term" ("LT") bandwidth estimator parameters... */
@@ -341,7 +343,8 @@ static void bbr_cwnd_event(struct sock *sk, enum tcp_ca_event event)
 	}
 }
 
-/* Find target cwnd. Right-size the cwnd based on min RTT and the
+/* 计算目标窗口cwnd
+ * Find target cwnd. Right-size the cwnd based on min RTT and the
  * estimated bottleneck bandwidth:
  *
  * cwnd = bw * min_rtt * gain = BDP * gain 核心公式
@@ -354,9 +357,9 @@ static void bbr_cwnd_event(struct sock *sk, enum tcp_ca_event event)
  * To achieve full performance in high-speed paths, we budget enough cwnd to
  * fit full-sized skbs in-flight on both end hosts to fully utilize the path:
  *   - one skb in sending host Qdisc,
- *   - one skb in sending host TSO/GSO engine
- *	
+ *   - one skb in sending host TSO/GSO engine	
  *   - one skb being received by receiver host LRO/GRO/delayed-ACK engine
+ *
  * 此处解释为啥最少需要4个包	
  * Don't worry, at low rates (bbr_min_tso_rate) this won't bloat cwnd because
  * in such cases tso_segs_goal is 1. The minimum cwnd is 4 packets,
@@ -443,7 +446,8 @@ static bool bbr_set_cwnd_to_recover_or_restore(
 	return false;
 }
 
-/* Slow-start up toward target cwnd (if bw estimate is growing, or packet loss
+/* 按设置的target cwnd来调整窗口
+ * Slow-start up toward target cwnd (if bw estimate is growing, or packet loss
  * has drawn us down below target), or snap down to target if we're above it.
  */
 static void bbr_set_cwnd(struct sock *sk, const struct rate_sample *rs,
