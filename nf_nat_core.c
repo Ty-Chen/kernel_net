@@ -347,7 +347,7 @@ get_unique_tuple(struct nf_conntrack_tuple *tuple,
 	 * This is only required for source (ie. NAT/masq) mappings.
 	 * So far, we don't do local source mappings, so multiple
 	 * manips not an issue.
-	 *
+	 * 第一步首先尝试iptables命令行输入进来的地址和端口是否可用
 	 * 仔细看这里的标记位检查，发现了RANDOM_ALL，这是iptables命令行masquerade --random所对应的标记位
 	 */
 	if (maniptype == NF_NAT_MANIP_SRC &&
@@ -366,7 +366,9 @@ get_unique_tuple(struct nf_conntrack_tuple *tuple,
 		}
 	}
 
-	/* 2) Select the least-used IP/proto combination in the given range */
+	/* 2) Select the least-used IP/proto combination in the given range
+	 * 若不在范围内，则选择范围内最少使用的IP和端口 
+	 */
 	*tuple = *orig_tuple;
 	find_best_ips_proto(zone, tuple, range, ct, maniptype);
 
