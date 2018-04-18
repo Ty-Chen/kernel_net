@@ -9,6 +9,8 @@
  *   pacing_rate = pacing_gain * bottleneck_bandwidth
  *   cwnd = max(cwnd_gain * bottleneck_bandwidth * min_rtt, 4)
  *
+ * pacing_rate和cwnd是整个算法最关键的核心所在，他们随着状态的变化而改变，并以此在实际上控制TCP的发包
+ *
  * The core algorithm does not react directly to packet losses or delays,
  * although BBR may adjust the size of next send per ACK when loss is
  * observed, or adjust the sending rate if it estimates there is a
@@ -22,6 +24,7 @@
  *    |        |         |
  *    |        V         |
  *    |      DRAIN   ----+
+ 
  *    |        |         |
  *    |        V         |
  *    +---> PROBE_BW ----+
@@ -78,10 +81,13 @@
 #define BW_SCALE 24
 #define BW_UNIT (1 << BW_SCALE)
 
+/*个人推测这里的BBR单位意思是使用kb作为单位，不知道理解的是否正确*/
 #define BBR_SCALE 8	/* scaling factor for fractions in BBR (e.g. gains) */
 #define BBR_UNIT (1 << BBR_SCALE)
 
-/* BBR has the following modes for deciding how fast to send: */
+/* BBR has the following modes for deciding how fast to send:
+ * BBR四种标准状态
+ */
 enum bbr_mode {
 	BBR_STARTUP,	/* ramp up sending rate rapidly to fill pipe */
 	BBR_DRAIN,	/* drain any queue created during startup */
@@ -94,7 +100,7 @@ struct bbr {
 	u32	min_rtt_us;	        /* min RTT in min_rtt_win_sec window */
 	u32	min_rtt_stamp;	        /* timestamp of min_rtt_us */
 	u32	probe_rtt_done_stamp;   /* end time for BBR_PROBE_RTT mode */
-	struct minmax bw;	/* Max recent delivery rate in pkts/uS << 24 */
+	struct  minmax bw;	/* Max recent delivery rate in pkts/uS << 24 */
 	u32	rtt_cnt;	    /* count of packet-timed rounds elapsed */
 	u32     next_rtt_delivered; /* scb->tx.delivered at end of round */
 	u64	cycle_mstamp;	     /* time of this cycle phase start */
@@ -129,8 +135,12 @@ struct bbr {
 
 /* Window length of bw filter (in rounds): */
 static const int bbr_bw_rtts = CYCLE_LEN + 2;
-/* Window length of min_rtt filter (in sec): */
+
+/* 10s未更新最小RTT则进入PROBE_RTT
+ * Window length of min_rtt filter (in sec): 
+ */
 static const u32 bbr_min_rtt_win_sec = 10;
+
 /* Minimum time (in ms) spent at bbr_cwnd_min_target in BBR_PROBE_RTT mode: */
 static const u32 bbr_probe_rtt_mode_ms = 200;
 /* Skip TSO below the following bandwidth (bits/sec): */
@@ -140,12 +150,13 @@ static const int bbr_min_tso_rate = 1200000;
  * that will allow a smoothly increasing pacing rate that will double each RTT
  * and send the same number of packets per RTT that an un-paced, slow-starting
  * Reno or CUBIC flow would:
- *
  * 模拟cubic的增加曲线做出的增长系数，这里类似于慢增长算法
  */
 static const int bbr_high_gain  = BBR_UNIT * 2885 / 1000 + 1;
+
 /* The pacing gain of 1/high_gain in BBR_DRAIN is calculated to typically drain
  * the queue created in BBR_STARTUP in a single round:
+ * drain阶段用startup阶段的倒数来排空：主要通过控制pacing rate，窗口大小保持不变
  */
 static const int bbr_drain_gain = BBR_UNIT * 1000 / 2885;
 /* The gain for deriving steady-state cwnd tolerates delayed/stretched ACKs: */
@@ -174,13 +185,17 @@ static const u32 bbr_cwnd_min_target = 4;
 /* To estimate if BBR_STARTUP mode (i.e. high_gain) has filled pipe... */
 /* If bw has increased significantly (1.25x), there may be more bw available: */
 static const u32 bbr_full_bw_thresh = BBR_UNIT * 5 / 4;
-/* But after 3 rounds w/o significant bw growth, estimate pipe is full: */
+/* 3个ACK未增长则视为管道已满
+ * But after 3 rounds w/o significant bw growth, estimate pipe is full: 
+ */
 static const u32 bbr_full_bw_cnt = 3;
 
 /* "long-term" ("LT") bandwidth estimator parameters... */
 /* The minimum number of rounds in an LT bw sampling interval: */
 static const u32 bbr_lt_intvl_min_rtts = 4;
-/* If lost/delivered ratio > 20%, interval is "lossy" and we may be policed: */
+/* If lost/delivered ratio > 20%, interval is "lossy" and we may be policed: 
+ * 论文中丢包率大于20%会有暴跌，就是这里带来的
+ */
 static const u32 bbr_lt_loss_thresh = 50;
 /* If 2 intervals have a bw ratio <= 1/8, their bw is "consistent": */
 static const u32 bbr_lt_bw_ratio = BBR_UNIT / 8;
@@ -189,7 +204,7 @@ static const u32 bbr_lt_bw_diff = 4000 / 8;
 /* If we estimate we're policed, use lt_bw for this many round trips: */
 static const u32 bbr_lt_bw_max_rtts = 48;
 
-/* Do we estimate that STARTUP filled the pipe? */
+/* Do we estimate that STARTUP filled the pipe?检测STARTUP是否结束 */
 static bool bbr_full_bw_reached(const struct sock *sk)
 {
 	const struct bbr *bbr = inet_csk_ca(sk);
@@ -197,7 +212,7 @@ static bool bbr_full_bw_reached(const struct sock *sk)
 	return bbr->full_bw_reached;
 }
 
-/* Return the windowed max recent bandwidth sample, in pkts/uS << BW_SCALE. */
+/* Return the windowed max recent bandwidth sample, in pkts/uS << BW_SCALE. 最大探测带宽*/
 static u32 bbr_max_bw(const struct sock *sk)
 {
 	struct bbr *bbr = inet_csk_ca(sk);
@@ -205,7 +220,7 @@ static u32 bbr_max_bw(const struct sock *sk)
 	return minmax_get(&bbr->bw);
 }
 
-/* Return the estimated bandwidth of the path, in pkts/uS << BW_SCALE. */
+/* Return the estimated bandwidth of the path, in pkts/uS << BW_SCALE. 设置估计带宽为LT_bw或者最大探测带宽*/
 static u32 bbr_bw(const struct sock *sk)
 {
 	struct bbr *bbr = inet_csk_ca(sk);
@@ -213,7 +228,8 @@ static u32 bbr_bw(const struct sock *sk)
 	return bbr->lt_use_bw ? bbr->lt_bw : bbr_max_bw(sk);
 }
 
-/* Return rate in bytes per second, optionally with a gain.
+/* 根据ACK计算速率
+ * Return rate in bytes per second, optionally with a gain.
  * The order here is chosen carefully to avoid overflow of u64. This should
  * work for input rates of up to 2.9Tbit/sec and gain of 2.89x.
  */
@@ -226,7 +242,9 @@ static u64 bbr_rate_bytes_per_sec(struct sock *sk, u64 rate, int gain)
 	return rate >> BW_SCALE;
 }
 
-/* Convert a BBR bw and gain factor to a pacing rate in bytes per second. */
+/* 根据bw计算pacing_rate 
+ * Convert a BBR bw and gain factor to a pacing rate in bytes per second. 
+ */
 static u32 bbr_bw_to_pacing_rate(struct sock *sk, u32 bw, int gain)
 {
 	u64 rate = bw;
@@ -236,7 +254,9 @@ static u32 bbr_bw_to_pacing_rate(struct sock *sk, u32 bw, int gain)
 	return rate;
 }
 
-/* Initialize pacing rate to: high_gain * init_cwnd / RTT. */
+/* 初始化pacing rate
+ * Initialize pacing rate to: high_gain * init_cwnd / RTT. 
+ */
 static void bbr_init_pacing_rate_from_rtt(struct sock *sk)
 {
 	struct tcp_sock *tp = tcp_sk(sk);
@@ -255,7 +275,8 @@ static void bbr_init_pacing_rate_from_rtt(struct sock *sk)
 	sk->sk_pacing_rate = bbr_bw_to_pacing_rate(sk, bw, bbr_high_gain);
 }
 
-/* Pace using current bw estimate and a gain factor. In order to help drive the
+/* pacing_rate是控制速率的关键手段
+ * Pace using current bw estimate and a gain factor. In order to help drive the
  * network toward lower queues while maintaining high utilization and low
  * latency, the average pacing rate aims to be slightly (~1%) lower than the
  * estimated bandwidth. This is an important aspect of the design. In this
@@ -268,8 +289,9 @@ static void bbr_set_pacing_rate(struct sock *sk, u32 bw, int gain)
 	struct bbr *bbr = inet_csk_ca(sk);
 	u32 rate = bbr_bw_to_pacing_rate(sk, bw, gain);
 
+	/*如果未收到ACK则调用初始化速率*/
 	if (unlikely(!bbr->has_seen_rtt && tp->srtt_us))
-		bbr_init_pacing_rate_from_rtt(sk);
+		bbr_init_pacing_rate_from_rtt(sk);	
 	if (bbr_full_bw_reached(sk) || rate > sk->sk_pacing_rate)
 		sk->sk_pacing_rate = rate;
 }
@@ -293,7 +315,7 @@ static void bbr_set_tso_segs_goal(struct sock *sk)
 				 0x7FU);
 }
 
-/* Save "last known good" cwnd so we can restore it after losses or PROBE_RTT */
+/* Save "last known good" cwnd so we can restore it after losses or PROBE_RTT 保存上次使用的拥塞窗口*/
 static void bbr_save_cwnd(struct sock *sk)
 {
 	struct tcp_sock *tp = tcp_sk(sk);
@@ -305,6 +327,7 @@ static void bbr_save_cwnd(struct sock *sk)
 		bbr->prior_cwnd = max(bbr->prior_cwnd, tp->snd_cwnd);
 }
 
+/*拥塞窗口事件触发：如果在探测阶段则设置pacing rate*/
 static void bbr_cwnd_event(struct sock *sk, enum tcp_ca_event event)
 {
 	struct tcp_sock *tp = tcp_sk(sk);
@@ -320,10 +343,11 @@ static void bbr_cwnd_event(struct sock *sk, enum tcp_ca_event event)
 	}
 }
 
-/* Find target cwnd. Right-size the cwnd based on min RTT and the
+/* 计算目标窗口cwnd
+ * Find target cwnd. Right-size the cwnd based on min RTT and the
  * estimated bottleneck bandwidth:
  *
- * cwnd = bw * min_rtt * gain = BDP * gain
+ * cwnd = bw * min_rtt * gain = BDP * gain 核心公式
  *
  * The key factor, gain, controls the amount of queue. While a small gain
  * builds a smaller queue, it becomes more vulnerable to noise in RTT
@@ -333,8 +357,10 @@ static void bbr_cwnd_event(struct sock *sk, enum tcp_ca_event event)
  * To achieve full performance in high-speed paths, we budget enough cwnd to
  * fit full-sized skbs in-flight on both end hosts to fully utilize the path:
  *   - one skb in sending host Qdisc,
- *   - one skb in sending host TSO/GSO engine
+ *   - one skb in sending host TSO/GSO engine	
  *   - one skb being received by receiver host LRO/GRO/delayed-ACK engine
+ *
+ * 此处解释为啥最少需要4个包	
  * Don't worry, at low rates (bbr_min_tso_rate) this won't bloat cwnd because
  * in such cases tso_segs_goal is 1. The minimum cwnd is 4 packets,
  * which allows 2 outstanding 2-packet sequences, to try to keep pipe
@@ -353,7 +379,7 @@ static u32 bbr_target_cwnd(struct sock *sk, u32 bw, int gain)
 	 * case we need to slow-start up toward something safe: TCP_INIT_CWND.
 	 */
 	if (unlikely(bbr->min_rtt_us == ~0U))	 /* no valid RTT samples yet? */
-		return TCP_INIT_CWND;  /* be safe: cap at default initial cwnd*/
+		return TCP_INIT_CWND;  /* 初始值10 be safe: cap at default initial cwnd*/
 
 	w = (u64)bw * bbr->min_rtt_us;
 
@@ -369,7 +395,8 @@ static u32 bbr_target_cwnd(struct sock *sk, u32 bw, int gain)
 	return cwnd;
 }
 
-/* An optimization in BBR to reduce losses: On the first round of recovery, we
+/* 保存窗口，方便从PROBE_RTT进入时恢复
+ * An optimization in BBR to reduce losses: On the first round of recovery, we
  * follow the packet conservation principle: send P packets per P packets acked.
  * After that, we slow-start and send at most 2*P packets per P packets acked.
  * After recovery finishes, or upon undo, we restore the cwnd we had when
@@ -419,7 +446,8 @@ static bool bbr_set_cwnd_to_recover_or_restore(
 	return false;
 }
 
-/* Slow-start up toward target cwnd (if bw estimate is growing, or packet loss
+/* 按设置的target cwnd来调整窗口
+ * Slow-start up toward target cwnd (if bw estimate is growing, or packet loss
  * has drawn us down below target), or snap down to target if we're above it.
  */
 static void bbr_set_cwnd(struct sock *sk, const struct rate_sample *rs,
@@ -497,7 +525,9 @@ static void bbr_advance_cycle_phase(struct sock *sk)
 	bbr->pacing_gain = bbr_pacing_gain[bbr->cycle_idx];
 }
 
-/* Gain cycling: cycle pacing gain to converge to fair share of available bw. */
+/* Probe_BW阶段的gain循环 
+ * Gain cycling: cycle pacing gain to converge to fair share of available bw. 
+ */
 static void bbr_update_cycle_phase(struct sock *sk,
 				   const struct rate_sample *rs)
 {
@@ -528,6 +558,7 @@ static void bbr_reset_probe_bw_mode(struct sock *sk)
 	bbr_advance_cycle_phase(sk);	/* flip to next phase of gain cycle */
 }
 
+/*PROBE_RTT结束后的状态重置*/
 static void bbr_reset_mode(struct sock *sk)
 {
 	if (!bbr_full_bw_reached(sk))
@@ -583,7 +614,8 @@ static void bbr_lt_bw_interval_done(struct sock *sk, u32 bw)
 	bbr_reset_lt_bw_sampling_interval(sk);
 }
 
-/* Token-bucket traffic policers are common (see "An Internet-Wide Analysis of
+/* 考虑到可能TCP使用了令牌桶限制流量，因此这里对令牌桶的情况进行了单独处理
+ * Token-bucket traffic policers are common (see "An Internet-Wide Analysis of
  * Traffic Policing", SIGCOMM 2016). BBR detects token-bucket policers and
  * explicitly models their policed rate, to reduce unnecessary losses. We
  * estimate that we're policed if we see 2 consecutive sampling intervals with
@@ -607,7 +639,8 @@ static void bbr_lt_bw_sampling(struct sock *sk, const struct rate_sample *rs)
 		return;
 	}
 
-	/* Wait for the first loss before sampling, to let the policer exhaust
+	/* 当没有令牌即可估计稳定状态的容量
+	 * Wait for the first loss before sampling, to let the policer exhaust
 	 * its tokens and estimate the steady-state rate allowed by the policer.
 	 * Starting samples earlier includes bursts that over-estimate the bw.
 	 */
@@ -662,7 +695,9 @@ static void bbr_lt_bw_sampling(struct sock *sk, const struct rate_sample *rs)
 	bbr_lt_bw_interval_done(sk, bw);
 }
 
-/* Estimate the bandwidth based on how fast packets are delivered */
+/* 带宽估计 
+ * Estimate the bandwidth based on how fast packets are delivered 
+ */
 static void bbr_update_bw(struct sock *sk, const struct rate_sample *rs)
 {
 	struct tcp_sock *tp = tcp_sk(sk);
@@ -710,10 +745,16 @@ static void bbr_update_bw(struct sock *sk, const struct rate_sample *rs)
 /* Estimate when the pipe is full, using the change in delivery rate: BBR
  * estimates that STARTUP filled the pipe if the estimated bw hasn't changed by
  * at least bbr_full_bw_thresh (25%) after bbr_full_bw_cnt (3) non-app-limited
- * rounds. Why 3 rounds: 1: rwin autotuning grows the rwin, 2: we fill the
+ * rounds. 
+ * 通过三轮未增加带宽检测
+ * Why 3 rounds: 1: rwin autotuning grows the rwin, 2: we fill the
  * higher rwin, 3: we get higher delivery rate samples. Or transient
  * cross-traffic or radio noise can go away. CUBIC Hystart shares a similar
  * design goal, but uses delay and inter-ACK spacing instead of bandwidth.
+ * 
+ * 第一轮接收窗口探测到了带宽的增加并增加窗口
+ * 第二轮填满接收窗口
+ * 第三轮返回高的传输速率
  */
 static void bbr_check_full_bw_reached(struct sock *sk,
 				      const struct rate_sample *rs)
@@ -734,7 +775,9 @@ static void bbr_check_full_bw_reached(struct sock *sk,
 	bbr->full_bw_reached = bbr->full_bw_cnt >= bbr_full_bw_cnt;
 }
 
-/* If pipe is probably full, drain the queue and then enter steady-state. */
+/* STARTUP后期，检查管道是否满了，满了则切换至DRAIN 
+ * If pipe is probably full, drain the queue and then enter steady-state. 
+ */
 static void bbr_check_drain(struct sock *sk, const struct rate_sample *rs)
 {
 	struct bbr *bbr = inet_csk_ca(sk);
@@ -750,7 +793,8 @@ static void bbr_check_drain(struct sock *sk, const struct rate_sample *rs)
 		bbr_reset_probe_bw_mode(sk);  /* we estimate queue is drained */
 }
 
-/* The goal of PROBE_RTT mode is to have BBR flows cooperatively and
+/* PROBE_RTT状态
+ * The goal of PROBE_RTT mode is to have BBR flows cooperatively and
  * periodically drain the bottleneck queue, to converge to measure the true
  * min_rtt (unloaded propagation delay). This allows the flows to keep queues
  * small (reducing queuing delay and packet loss) and achieve fairness among
@@ -768,6 +812,8 @@ static void bbr_check_drain(struct sock *sk, const struct rate_sample *rs)
  * natural silences or low-rate periods within 10 seconds where the rate is low
  * enough for long enough to drain its queue in the bottleneck. We pick up
  * these min RTT measurements opportunistically with our min_rtt filter. :-)
+ *
+ * 若在PROBE_RTT结束时，根据当前网络状况决定进入STARTUP还是PROBE_BW
  */
 static void bbr_update_min_rtt(struct sock *sk, const struct rate_sample *rs)
 {
@@ -818,6 +864,7 @@ static void bbr_update_min_rtt(struct sock *sk, const struct rate_sample *rs)
 	bbr->idle_restart = 0;
 }
 
+/*全状态更新函数如下所列*/
 static void bbr_update_model(struct sock *sk, const struct rate_sample *rs)
 {
 	bbr_update_bw(sk, rs);
