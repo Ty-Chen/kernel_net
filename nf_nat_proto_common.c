@@ -56,7 +56,6 @@ void nf_nat_l4proto_unique_tuple(const struct nf_nat_l3proto *l3proto,
 		if (maniptype == NF_NAT_MANIP_DST)
 			return;
 
-		/*计算min和range_size*/
 		if (ntohs(*portptr) < 1024) {
 			/* Loose convention: >> 512 is credential passing */
 			if (ntohs(*portptr) < 512) {
@@ -75,7 +74,6 @@ void nf_nat_l4proto_unique_tuple(const struct nf_nat_l3proto *l3proto,
 		range_size = ntohs(range->max_proto.all) - min + 1;
 	}
 
-	/*计算偏移量off*/
 	if (range->flags & NF_NAT_RANGE_PROTO_RANDOM) {
 		off = l3proto->secure_port(tuple, maniptype == NF_NAT_MANIP_SRC
 						  ? tuple->dst.u.all
@@ -86,7 +84,6 @@ void nf_nat_l4proto_unique_tuple(const struct nf_nat_l3proto *l3proto,
 		off = *rover;
 	}
 
-	/*寻找满足要求的端口*/
 	for (i = 0; ; ++off) {
 		*portptr = htons(min + off % range_size);
 		if (++i != range_size && nf_nat_used_tuple(tuple, ct))
