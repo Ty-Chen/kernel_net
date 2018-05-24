@@ -17,13 +17,15 @@
 #include <net/netfilter/nf_nat_l3proto.h>
 #include <net/netfilter/nf_nat_l4proto.h>
 
+/* 判断端口是否在可用范围内*/
 bool nf_nat_l4proto_in_range(const struct nf_conntrack_tuple *tuple,
 			     enum nf_nat_manip_type maniptype,
 			     const union nf_conntrack_man_proto *min,
 			     const union nf_conntrack_man_proto *max)
 {
 	__be16 port;
-
+	
+	/*根据SNAT和DNAT的不同取不同的值*/
 	if (maniptype == NF_NAT_MANIP_SRC)
 		port = tuple->src.u.all;
 	else
@@ -34,6 +36,8 @@ bool nf_nat_l4proto_in_range(const struct nf_conntrack_tuple *tuple,
 }
 EXPORT_SYMBOL_GPL(nf_nat_l4proto_in_range);
 
+
+/*对称型的NAT端口变化关键算法*/
 void nf_nat_l4proto_unique_tuple(const struct nf_nat_l3proto *l3proto,
 				 struct nf_conntrack_tuple *tuple,
 				 const struct nf_nat_range *range,
@@ -44,7 +48,8 @@ void nf_nat_l4proto_unique_tuple(const struct nf_nat_l3proto *l3proto,
 	unsigned int range_size, min, i;
 	__be16 *portptr;
 	u_int16_t off;
-
+	
+	/*根据SNAT和DNAT的不同取不同的值*/
 	if (maniptype == NF_NAT_MANIP_SRC)
 		portptr = &tuple->src.u.all;
 	else
@@ -55,7 +60,8 @@ void nf_nat_l4proto_unique_tuple(const struct nf_nat_l3proto *l3proto,
 		/* If it's dst rewrite, can't change port */
 		if (maniptype == NF_NAT_MANIP_DST)
 			return;
-
+		
+		/*首先取一个min的值*/
 		if (ntohs(*portptr) < 1024) {
 			/* Loose convention: >> 512 is credential passing */
 			if (ntohs(*portptr) < 512) {
@@ -74,6 +80,7 @@ void nf_nat_l4proto_unique_tuple(const struct nf_nat_l3proto *l3proto,
 		range_size = ntohs(range->max_proto.all) - min + 1;
 	}
 
+	/*设置偏移量off值*/
 	if (range->flags & NF_NAT_RANGE_PROTO_RANDOM) {
 		off = l3proto->secure_port(tuple, maniptype == NF_NAT_MANIP_SRC
 						  ? tuple->dst.u.all
@@ -84,6 +91,7 @@ void nf_nat_l4proto_unique_tuple(const struct nf_nat_l3proto *l3proto,
 		off = *rover;
 	}
 
+	/*不断增加端口号直到找到可用的端口*/
 	for (i = 0; ; ++off) {
 		*portptr = htons(min + off % range_size);
 		if (++i != range_size && nf_nat_used_tuple(tuple, ct))
