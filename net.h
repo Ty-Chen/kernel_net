@@ -97,14 +97,14 @@ struct socket_wq {
 	struct rcu_head		rcu;
 } ____cacheline_aligned_in_smp;
 
-/**
+/** 即平时使用的socket
  *  struct socket - general BSD socket
  *  @state: socket state (%SS_CONNECTED, etc)
  *  @type: socket type (%SOCK_STREAM, etc)
  *  @flags: socket flags (%SOCK_NOSPACE, etc)
  *  @ops: protocol specific socket operations
  *  @file: File back pointer for gc
- *  @sk: internal networking protocol agnostic socket representation
+ *  @sk: internal networking protocol agnostic socket representation 内部调用sock结构体
  *  @wq: wait queue for several uses
  */
 struct socket {
