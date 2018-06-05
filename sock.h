@@ -120,13 +120,13 @@ typedef __u64 __bitwise __addrpair;
 
 /**
  *	struct sock_common - minimal network layer representation of sockets
- *	@skc_daddr: Foreign IPv4 addr
- *	@skc_rcv_saddr: Bound local IPv4 addr
- *	@skc_hash: hash value used with various protocol lookup tables
+ *	@skc_daddr: Foreign IPv4 addr 目的地址     
+ *	@skc_rcv_saddr: Bound local IPv4 addr 源地址
+ *	@skc_hash: hash value used with various protocol lookup tables 查找表
  *	@skc_u16hashes: two u16 hash values used by UDP lookup tables
- *	@skc_dport: placeholder for inet_dport/tw_dport
- *	@skc_num: placeholder for inet_num/tw_num
- *	@skc_family: network address family
+ *	@skc_dport: placeholder for inet_dport/tw_dport 目的端口
+ *	@skc_num: placeholder for inet_num/tw_num 
+ *	@skc_family: network address family 
  *	@skc_state: Connection state
  *	@skc_reuse: %SO_REUSEADDR setting
  *	@skc_reuseport: %SO_REUSEPORT setting
